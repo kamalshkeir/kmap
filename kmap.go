@@ -86,9 +86,7 @@ func (sm *SafeMap[K, V]) Flush() {
 }
 
 func (sm *SafeMap[K, V]) Range(fn func(key K, value V)) {
-	sm.mutex.Lock()
 	for k, v := range sm.m {
 		fn(k, v)
 	}
-	sm.mutex.Unlock()
 }
