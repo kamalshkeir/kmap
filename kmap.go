@@ -12,11 +12,11 @@ type SafeMap[K comparable, V any] struct {
 }
 
 func New[K comparable, V any](oredered bool) *SafeMap[K, V] {
-	var order =map[int]K{}
+	var order = map[int]K{}
 	return &SafeMap[K, V]{
-		mutex: sync.RWMutex{},
-		m:     make(map[K]V),
-		order: order,
+		mutex:   sync.RWMutex{},
+		m:       make(map[K]V),
+		order:   order,
 		ordered: oredered,
 	}
 }
@@ -84,7 +84,6 @@ func (sm *SafeMap[K, V]) Flush() {
 	sm.m = map[K]V{}
 	sm.mutex.Unlock()
 }
-
 
 func (sm *SafeMap[K, V]) Range(fn func(key K, value V)) {
 	sm.mutex.Lock()
