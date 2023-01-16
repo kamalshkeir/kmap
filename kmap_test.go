@@ -10,8 +10,17 @@ type User struct {
 	Name string
 }
 
+var bigSlice = make([]User, 400)
+var safe2 = New[int, any](false, 500)
+
+func init() {
+	for i := 0; i < 400; i++ {
+		bigSlice[i] = User{i, fmt.Sprintf("User %d", i)}
+	}
+}
+
 func TestSafeMap(t *testing.T) {
-	m := New[int, User](false)
+	m := New[int, User](false, 10)
 
 	// Test Set and Get
 	m.Set(1, User{1, "John"})
@@ -48,26 +57,61 @@ func TestSafeMap(t *testing.T) {
 	}
 }
 
+func TestSafeMapOrdered(t *testing.T) {
+	m := New[string, User](true, 10)
+
+	// Test Set and Get
+	m.Set("1", User{1, "Jane1"})
+	m.Set("2", User{2, "Jane2"})
+	m.Set("3", User{3, "Jane3"})
+	m.Set("4", User{4, "Jane4"})
+	keys := m.Keys()
+	if len(keys) != 4 || keys[3] != "4" {
+		t.Error("order not working for keys", keys)
+	}
+	values := m.Values()
+	if len(values) != 4 || values[3].Name != "Jane4" {
+		t.Error("order not working for values", values)
+	}
+}
+
+func TestSafeMapLimit(t *testing.T) {
+	m := New[int, []byte](false, 11)
+	data := make([]byte, 10*1024*1024)
+	// Test Set and Get
+	err := m.Set(1, data)
+	if err != nil {
+		t.Error(err)
+	}
+	err = m.Set(2, data)
+	if err != nil {
+		t.Error(err)
+	}
+
+	d, ok := m.Get(1)
+	if !ok {
+		t.Error("not okk")
+	}
+	t.Log(len(d))
+}
+
 func BenchmarkSafeMapSet(b *testing.B) {
-	m := New[int, User](false)
 	for i := 0; i < b.N; i++ {
-		m.Set(i, User{i, fmt.Sprintf("User %d", i)})
+		safe2.Set(i, bigSlice)
+		// if err != nil {
+		// 	b.Log(err)
+		// }
 	}
 }
 
 func BenchmarkSafeMapGet(b *testing.B) {
-	m := New[int, User](false)
 	for i := 0; i < b.N; i++ {
-		m.Set(i, User{i, fmt.Sprintf("User %d", i)})
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		m.Get(i)
+		safe2.Get(i)
 	}
 }
 
 func BenchmarkSafeMapKeys(b *testing.B) {
-	m := New[int, User](false)
+	m := New[int, User](false, 50)
 	for i := 0; i < b.N; i++ {
 		m.Set(i, User{i, fmt.Sprintf("User %d", i)})
 	}
@@ -78,7 +122,7 @@ func BenchmarkSafeMapKeys(b *testing.B) {
 }
 
 func BenchmarkSafeMapValues(b *testing.B) {
-	m := New[int, User](false)
+	m := New[int, User](false, 100)
 	for i := 0; i < b.N; i++ {
 		m.Set(i, User{i, fmt.Sprintf("User %d", i)})
 	}
@@ -89,7 +133,7 @@ func BenchmarkSafeMapValues(b *testing.B) {
 }
 
 func BenchmarkSafeMapDelete(b *testing.B) {
-	m := New[int, User](false)
+	m := New[int, User](false, 100)
 	for i := 0; i < b.N; i++ {
 		m.Set(i, User{i, fmt.Sprintf("User %d", i)})
 	}
@@ -100,7 +144,7 @@ func BenchmarkSafeMapDelete(b *testing.B) {
 }
 
 func BenchmarkSafeMapRange(b *testing.B) {
-	m := New[int, User](false)
+	m := New[int, User](false, 50)
 	for i := 0; i < b.N; i++ {
 		m.Set(i, User{i, fmt.Sprintf("User %d", i)})
 	}
