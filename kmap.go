@@ -59,6 +59,20 @@ func (c *SafeMap[K, V]) Get(key K) (V, bool) {
 	return i.value, true
 }
 
+func (c *SafeMap[K, V]) GetAny(keys ...K) (V, bool) {
+	c.RLock()
+	defer c.RUnlock()
+	found := false
+	for _, key := range keys {
+		i, ok := c.items[key]
+		if ok {
+			found = true
+			return i.value, found
+		}
+	}
+	return *new(V), false
+}
+
 func (c *SafeMap[K, V]) Set(key K, value V) error {
 	c.Lock()
 	defer c.Unlock()
