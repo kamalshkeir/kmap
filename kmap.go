@@ -176,16 +176,21 @@ func (c *SafeMap[K, V]) Flush() {
 	}
 }
 
-func (c *SafeMap[K, V]) Range(f func(key K, value V)) {
+// Range calls f sequentially for each key and value present in the map. If f returns false, range stops the iteration.
+func (c *SafeMap[K, V]) Range(f func(key K, value V) bool) {
 	c.RLock()
 	defer c.RUnlock()
 	if c.ordered && len(c.order) == len(c.items) {
 		for _, k := range c.order {
-			f(k, c.items[k].value)
+			if !f(k, c.items[k].value) {
+				break
+			}
 		}
 	} else {
 		for k, v := range c.items {
-			f(k, v.value)
+			if !f(k, v.value) {
+				break
+			}
 		}
 	}
 }
