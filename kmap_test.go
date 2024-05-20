@@ -14,7 +14,7 @@ type User struct {
 }
 
 var bigSlice = make([]User, 400)
-var safe2 = kmap.New[int, any](false, 500)
+var safe2 = kmap.New[int, any](500)
 var sncmap = sync.Map{}
 
 func init() {
@@ -24,7 +24,7 @@ func init() {
 }
 
 func TestSafeMap(t *testing.T) {
-	m := kmap.New[int, User](false, 10)
+	m := kmap.New[int, User](10)
 
 	// Test Set and Get
 	m.Set(1, User{1, "John"})
@@ -62,7 +62,7 @@ func TestSafeMap(t *testing.T) {
 }
 
 func TestSafeMapOrdered(t *testing.T) {
-	m := kmap.New[string, User](true, 10)
+	m := kmap.NewOrdered[string, User](10)
 
 	// Test Set and Get
 	m.Set("1", User{1, "Jane1"})
@@ -80,7 +80,7 @@ func TestSafeMapOrdered(t *testing.T) {
 }
 
 func TestSafeMapLimit(t *testing.T) {
-	m := kmap.New[int, []byte](false, 11)
+	m := kmap.New[int, []byte](11)
 	data := make([]byte, 10*1024*1024)
 	// Test Set and Get
 	err := m.Set(1, data)
@@ -124,7 +124,7 @@ func BenchmarkSyncMapGet(b *testing.B) {
 }
 
 func BenchmarkSafeMapKeys(b *testing.B) {
-	m := kmap.New[int, User](false, 50)
+	m := kmap.New[int, User](50)
 	for i := 0; i < b.N; i++ {
 		m.Set(i, User{i, fmt.Sprintf("User %d", i)})
 	}
@@ -135,7 +135,7 @@ func BenchmarkSafeMapKeys(b *testing.B) {
 }
 
 func BenchmarkSafeMapValues(b *testing.B) {
-	m := kmap.New[int, User](false, 100)
+	m := kmap.New[int, User](100)
 	for i := 0; i < b.N; i++ {
 		m.Set(i, User{i, fmt.Sprintf("User %d", i)})
 	}
@@ -146,7 +146,7 @@ func BenchmarkSafeMapValues(b *testing.B) {
 }
 
 func BenchmarkSafeMapDelete(b *testing.B) {
-	m := kmap.New[int, User](false, 100)
+	m := kmap.New[int, User](100)
 	for i := 0; i < b.N; i++ {
 		m.Set(i, User{i, fmt.Sprintf("User %d", i)})
 	}
@@ -168,7 +168,7 @@ func BenchmarkSyncMapDelete(b *testing.B) {
 }
 
 func BenchmarkSafeMapRange(b *testing.B) {
-	m := kmap.New[int, User](false, 50)
+	m := kmap.New[int, User](50)
 	for i := 0; i < b.N; i++ {
 		m.Set(i, User{i, fmt.Sprintf("User %d", i)})
 	}

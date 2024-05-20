@@ -25,14 +25,12 @@ type sizeCache struct {
 
 type SafeMap[K comparable, V any] struct {
 	sync.RWMutex
-	order   map[int]K
-	items   map[K]*item[V]
-	size    int
-	limit   int
-	ordered bool
+	items map[K]*item[V]
+	size  int
+	limit int
 }
 
-func New[K comparable, V any](ordered bool, limitMb ...int) *SafeMap[K, V] {
+func New[K comparable, V any](limitMb ...int) *SafeMap[K, V] {
 	limitmb := -1
 	if len(limitMb) > 0 && limitMb[0] > 0 {
 		limitmb = limitMb[0]
@@ -41,11 +39,9 @@ func New[K comparable, V any](ordered bool, limitMb ...int) *SafeMap[K, V] {
 		limitmb = limitmb * 1024 * 1024
 	}
 	return &SafeMap[K, V]{
-		ordered: ordered,
-		order:   make(map[int]K),
-		items:   make(map[K]*item[V]),
-		size:    0,
-		limit:   limitmb,
+		items: make(map[K]*item[V]),
+		size:  0,
+		limit: limitmb,
 	}
 }
 
@@ -100,10 +96,6 @@ func (c *SafeMap[K, V]) Set(key K, value V) error {
 	}
 	c.items[key] = i
 
-	if c.ordered {
-		c.order[len(c.order)] = key
-	}
-
 	return nil
 }
 
@@ -117,16 +109,8 @@ func (c *SafeMap[K, V]) Keys() []K {
 	c.RLock()
 	defer c.RUnlock()
 	keys := make([]K, 0, len(c.items))
-	if c.ordered && len(c.items) == len(c.order) {
-		i := 0
-		for range c.order {
-			keys = append(keys, c.order[i])
-			i++
-		}
-	} else {
-		for key := range c.items {
-			keys = append(keys, key)
-		}
+	for key := range c.items {
+		keys = append(keys, key)
 	}
 	return keys
 }
@@ -135,16 +119,8 @@ func (c *SafeMap[K, V]) Values() []V {
 	c.RLock()
 	defer c.RUnlock()
 	values := make([]V, 0, len(c.items))
-	if c.ordered && len(c.items) == len(c.order) {
-		i := 0
-		for range c.order {
-			values = append(values, c.items[c.order[i]].value)
-			i++
-		}
-	} else {
-		for _, item := range c.items {
-			values = append(values, item.value)
-		}
+	for _, item := range c.items {
+		values = append(values, item.value)
 	}
 	return values
 }
@@ -156,13 +132,6 @@ func (c *SafeMap[K, V]) Delete(key K) {
 	if ok {
 		c.size -= i.size
 		delete(c.items, key)
-		if c.ordered {
-			for index, o := range c.order {
-				if o == key {
-					delete(c.order, index)
-				}
-			}
-		}
 	}
 }
 
@@ -171,26 +140,15 @@ func (c *SafeMap[K, V]) Flush() {
 	defer c.Unlock()
 	c.items = make(map[K]*item[V])
 	c.size = 0
-	if c.ordered {
-		c.order = make(map[int]K)
-	}
 }
 
 // Range calls f sequentially for each key and value present in the map. If f returns false, range stops the iteration.
 func (c *SafeMap[K, V]) Range(f func(key K, value V) bool) {
 	c.RLock()
 	defer c.RUnlock()
-	if c.ordered && len(c.order) == len(c.items) {
-		for _, k := range c.order {
-			if !f(k, c.items[k].value) {
-				break
-			}
-		}
-	} else {
-		for k, v := range c.items {
-			if !f(k, v.value) {
-				break
-			}
+	for k, v := range c.items {
+		if !f(k, v.value) {
+			break
 		}
 	}
 }
