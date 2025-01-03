@@ -2,25 +2,43 @@ package kmap
 
 import (
 	"errors"
-	"reflect"
 	"sync"
-	"time"
 )
 
 var (
-	sc           = &sizeCache{cache: make(map[reflect.Type]int)}
 	ErrLargeData = errors.New("data exceeds the limit limit, will not be inserted")
 )
 
 type item[V any] struct {
-	value     V
-	timestamp time.Time
-	size      int
+	value V
+	size  int
 }
 
-type sizeCache struct {
-	sync.RWMutex
-	cache map[reflect.Type]int
+func (i *item[V]) reset(value V, size int) {
+	i.value = value
+	i.size = size
+}
+
+type itemPool[V any] struct {
+	pool sync.Pool
+}
+
+func newItemPool[V any]() *itemPool[V] {
+	return &itemPool[V]{
+		pool: sync.Pool{
+			New: func() interface{} {
+				return new(item[V])
+			},
+		},
+	}
+}
+
+func (p *itemPool[V]) get() *item[V] {
+	return p.pool.Get().(*item[V])
+}
+
+func (p *itemPool[V]) put(i *item[V]) {
+	p.pool.Put(i)
 }
 
 type SafeMap[K comparable, V any] struct {
@@ -28,73 +46,85 @@ type SafeMap[K comparable, V any] struct {
 	items map[K]*item[V]
 	size  int
 	limit int
+	pool  *itemPool[V]
 }
 
 func New[K comparable, V any](limitMb ...int) *SafeMap[K, V] {
 	limitmb := -1
 	if len(limitMb) > 0 && limitMb[0] > 0 {
-		limitmb = limitMb[0]
-	}
-	if limitmb > 1 {
-		limitmb = limitmb * 1024 * 1024
+		limitmb = limitMb[0] * 1024 * 1024
 	}
 	return &SafeMap[K, V]{
 		items: make(map[K]*item[V]),
 		size:  0,
 		limit: limitmb,
+		pool:  newItemPool[V](),
 	}
 }
 
-func (c *SafeMap[K, V]) Get(key K) (V, bool) {
+func (c *SafeMap[K, V]) Get(key K) (v V, ok bool) {
 	c.RLock()
-	defer c.RUnlock()
-	i, ok := c.items[key]
-	if !ok {
-		return *new(V), false
+	if i, exists := c.items[key]; exists {
+		c.RUnlock()
+		return i.value, true
 	}
-	return i.value, true
+	c.RUnlock()
+	return
 }
 
-func (c *SafeMap[K, V]) GetAny(keys ...K) (V, bool) {
+func (c *SafeMap[K, V]) GetAny(keys ...K) (v V, ok bool) {
 	c.RLock()
-	defer c.RUnlock()
-	found := false
 	for _, key := range keys {
-		i, ok := c.items[key]
-		if ok {
-			found = true
-			return i.value, found
+		if i, exists := c.items[key]; exists {
+			c.RUnlock()
+			return i.value, true
 		}
 	}
-	return *new(V), false
+	c.RUnlock()
+	return
 }
 
 func (c *SafeMap[K, V]) Set(key K, value V) error {
 	c.Lock()
 	defer c.Unlock()
-	var size int
+
+	// Use a fixed size for all values to avoid allocations
+	size := 64
+
+	// Check size limits if enabled
 	if c.limit > 0 {
-		size = sc.get(value)
-		if size == 0 {
-			size = sizeOfValue(value)
-			sc.set(value, size)
-		}
-		if size > c.limit {
-			return ErrLargeData
+		// Only check string size if we have a size limit
+		switch v := any(value).(type) {
+		case string:
+			if len(v) > c.limit {
+				return ErrLargeData
+			}
+			size = len(v)
 		}
 
 		if size+c.size > c.limit {
-			c.items = map[K]*item[V]{}
-			c.size = size
+			// Clear map and return items to pool
+			for _, oldItem := range c.items {
+				c.pool.put(oldItem)
+			}
+			for k := range c.items {
+				delete(c.items, k)
+			}
+			c.size = 0
 		}
 	}
 
-	i := &item[V]{
-		value:     value,
-		timestamp: time.Now(),
-		size:      size,
+	// Get existing item or get one from pool
+	i, exists := c.items[key]
+	if !exists {
+		i = c.pool.get()
+	} else {
+		c.size -= i.size // Subtract old size
 	}
+
+	i.reset(value, size)
 	c.items[key] = i
+	c.size += size
 
 	return nil
 }
@@ -131,6 +161,7 @@ func (c *SafeMap[K, V]) Delete(key K) {
 	i, ok := c.items[key]
 	if ok {
 		c.size -= i.size
+		c.pool.put(i)
 		delete(c.items, key)
 	}
 }
@@ -138,7 +169,13 @@ func (c *SafeMap[K, V]) Delete(key K) {
 func (c *SafeMap[K, V]) Flush() {
 	c.Lock()
 	defer c.Unlock()
-	c.items = make(map[K]*item[V])
+	// Return all items to pool
+	for _, item := range c.items {
+		c.pool.put(item)
+	}
+	for k := range c.items {
+		delete(c.items, k)
+	}
 	c.size = 0
 }
 
@@ -151,49 +188,4 @@ func (c *SafeMap[K, V]) Range(f func(key K, value V) bool) {
 			break
 		}
 	}
-}
-
-func sizeOfValue(value interface{}) int {
-	size := int(reflect.TypeOf(value).Size())
-	v := reflect.ValueOf(value)
-
-	switch v.Kind() {
-	case reflect.Slice, reflect.Array:
-		if v.Len() > 0 {
-			size = sizeOfValue(v.Index(0).Interface())*v.Len() + size
-		}
-	case reflect.Map:
-		if len(v.MapKeys()) > 0 {
-			size = size * len(v.MapKeys())
-		}
-	case reflect.Struct:
-		vnf := v.NumField()
-		if vnf > 0 {
-			size = size * vnf
-		}
-	case reflect.Ptr:
-		if v.IsNil() {
-			return 0
-		}
-		size += sizeOfValue(v.Elem().Interface())
-	}
-	return size
-}
-
-func (sc *sizeCache) set(value interface{}, size int) {
-	sc.Lock()
-	defer sc.Unlock()
-	t := reflect.TypeOf(value)
-	sc.cache[t] = size
-}
-
-func (sc *sizeCache) get(value interface{}) int {
-	sc.RLock()
-	defer sc.RUnlock()
-	t := reflect.TypeOf(value)
-	size, ok := sc.cache[t]
-	if !ok {
-		return 0
-	}
-	return size
 }

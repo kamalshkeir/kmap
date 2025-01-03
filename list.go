@@ -4,6 +4,7 @@ type Element[K comparable, V any] struct {
 	next, prev *Element[K, V]
 	Key        K
 	Value      V
+	size       int
 }
 
 func (e *Element[K, V]) Next() *Element[K, V] {

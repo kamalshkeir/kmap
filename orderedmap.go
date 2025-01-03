@@ -2,12 +2,7 @@ package kmap
 
 import (
 	"fmt"
-	"reflect"
 	"sync"
-)
-
-var (
-	sco = &sizeCache{cache: make(map[reflect.Type]int)}
 )
 
 type OrderedMap[K comparable, V any] struct {
@@ -57,31 +52,42 @@ func (m *OrderedMap[K, V]) GetAny(keys ...K) (V, bool) {
 func (m *OrderedMap[K, V]) Set(key K, value V) error {
 	m.Lock()
 	defer m.Unlock()
-	var size int
+
+	// Use a fixed size for all values to avoid allocations
+	size := 64
+
 	if m.limit > 0 {
-		size = sco.get(value)
-		if size == 0 {
-			size = sizeOfValue(value)
-			sco.set(value, size)
-		}
-		if size > m.limit {
-			return fmt.Errorf("exceeded size limit")
+		// Only check string size if we have a size limit
+		switch v := any(value).(type) {
+		case string:
+			if len(v) > m.limit {
+				return fmt.Errorf("exceeded size limit")
+			}
+			size = len(v)
 		}
 
 		if size+m.size > m.limit {
-			m.kv = map[K]*Element[K, V]{}
+			for k := range m.kv {
+				delete(m.kv, k)
+			}
 			m.ll = list[K, V]{}
 			m.size = 0
 		}
 	}
+
 	_, alreadyExist := m.kv[key]
 	if alreadyExist {
+		oldSize := m.kv[key].size
 		m.kv[key].Value = value
+		m.kv[key].size = size
+		m.size = m.size - oldSize + size
 		return nil
 	}
 
 	element := m.ll.PushBack(key, value)
+	element.size = size
 	m.kv[key] = element
+	m.size += size
 	return nil
 }
 
@@ -137,6 +143,7 @@ func (m *OrderedMap[K, V]) Delete(key K) (didDelete bool) {
 	defer m.Unlock()
 	element, ok := m.kv[key]
 	if ok {
+		m.size -= element.size
 		m.ll.Remove(element)
 		delete(m.kv, key)
 	}
@@ -147,8 +154,11 @@ func (m *OrderedMap[K, V]) Delete(key K) (didDelete bool) {
 func (m *OrderedMap[K, V]) Flush() {
 	m.Lock()
 	defer m.Unlock()
-	m.kv = make(map[K]*Element[K, V])
+	for k := range m.kv {
+		delete(m.kv, k)
+	}
 	m.ll = list[K, V]{}
+	m.size = 0
 }
 
 func (m *OrderedMap[K, V]) Front() *Element[K, V] {
