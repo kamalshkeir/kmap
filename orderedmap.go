@@ -192,3 +192,92 @@ func (m *OrderedMap[K, V]) Range(f func(key K, value V) bool) {
 		}
 	}
 }
+
+// GetOrSet returns the existing value for the key if present.
+// Otherwise, it sets and returns the given value.
+func (m *OrderedMap[K, V]) GetOrSet(key K, value V) (actual V, loaded bool) {
+	if v, ok := m.Get(key); ok {
+		return v, true
+	}
+	m.Set(key, value)
+	return value, false
+}
+
+// GetOrCompute returns the existing value for the key if present.
+// Otherwise, it computes the value using the provided function,
+// sets it under the key, and returns the computed value.
+func (m *OrderedMap[K, V]) GetOrCompute(key K, fn func() V) V {
+	if v, ok := m.Get(key); ok {
+		return v
+	}
+	value := fn()
+	m.Set(key, value)
+	return value
+}
+
+// SetIfNotExists sets the value if the key doesn't exist and returns true.
+// If the key exists, it returns false and makes no changes.
+func (m *OrderedMap[K, V]) SetIfNotExists(key K, value V) bool {
+	m.Lock()
+	defer m.Unlock()
+	if _, exists := m.kv[key]; exists {
+		return false
+	}
+	m.ll.PushBack(key, value)
+	m.kv[key] = m.ll.Back()
+	return true
+}
+
+// DeleteAll removes all the specified keys and returns the number of keys removed
+func (m *OrderedMap[K, V]) DeleteAll(keys ...K) int {
+	if len(keys) == 0 {
+		return 0
+	}
+	m.Lock()
+	defer m.Unlock()
+	count := 0
+	for _, key := range keys {
+		if e, ok := m.kv[key]; ok {
+			m.ll.Remove(e)
+			delete(m.kv, key)
+			count++
+		}
+	}
+	return count
+}
+
+// GetAll returns all the values for the specified keys that exist
+func (m *OrderedMap[K, V]) GetAll(keys ...K) map[K]V {
+	if len(keys) == 0 {
+		return nil
+	}
+	m.RLock()
+	result := make(map[K]V, len(keys))
+	for _, key := range keys {
+		if e, ok := m.kv[key]; ok {
+			result[key] = e.Value
+		}
+	}
+	m.RUnlock()
+	return result
+}
+
+// SetAll sets all the key-value pairs in order and returns number of pairs set
+func (m *OrderedMap[K, V]) SetAll(pairs map[K]V) int {
+	if len(pairs) == 0 {
+		return 0
+	}
+	m.Lock()
+	defer m.Unlock()
+	count := 0
+	for k, v := range pairs {
+		if e, exists := m.kv[k]; exists {
+			e.Value = v
+		} else {
+			m.ll.PushBack(k, v)
+			m.kv[k] = m.ll.Back()
+		}
+		count++
+	}
+	return count
+}

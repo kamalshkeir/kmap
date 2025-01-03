@@ -219,7 +219,7 @@ func TestGetAny(t *testing.T) {
 
 func BenchmarkSafeMap_SetSmallValues(b *testing.B) {
 	m := New[string, string]()
-	m.items = make(map[string]*item[string], b.N)
+	m.items = make(map[string]item[string], b.N)
 	key := "test"
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -229,7 +229,7 @@ func BenchmarkSafeMap_SetSmallValues(b *testing.B) {
 
 func BenchmarkSafeMap_SetLargeValues(b *testing.B) {
 	m := New[string, string]()
-	m.items = make(map[string]*item[string], b.N)
+	m.items = make(map[string]item[string], b.N)
 	largeValue := strings.Repeat("x", 1024*1024) // 1MB string
 	key := "test"
 	b.ResetTimer()
@@ -257,7 +257,7 @@ func BenchmarkSafeMap_GetNonExistentKey(b *testing.B) {
 
 func BenchmarkSafeMap_Delete(b *testing.B) {
 	m := New[string, string]()
-	m.items = make(map[string]*item[string], b.N)
+	m.items = make(map[string]item[string], b.N)
 	key := "test"
 	for i := 0; i < b.N; i++ {
 		m.Set(key, "value")
@@ -280,7 +280,7 @@ func BenchmarkSafeMap_GetAnyWithHit(b *testing.B) {
 
 func BenchmarkSafeMap_ConcurrentSetAndGet(b *testing.B) {
 	m := New[int, int]()
-	m.items = make(map[int]*item[int], b.N)
+	m.items = make(map[int]item[int], b.N)
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
 		for pb.Next() {
@@ -296,7 +296,7 @@ func BenchmarkSafeMap_ConcurrentSetAndGet(b *testing.B) {
 
 func BenchmarkSafeMap_SizeLimitedOperations(b *testing.B) {
 	m := New[string, string](1) // 1MB limit
-	m.items = make(map[string]*item[string], b.N)
+	m.items = make(map[string]item[string], b.N)
 	smallValue := "small"
 	largeValue := strings.Repeat("x", 2*1024*1024) // 2MB string
 	key := "test"
@@ -344,4 +344,370 @@ func BenchmarkOrderedMap_Copy(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = m.Copy()
 	}
+}
+
+func BenchmarkSafeMap_Range(b *testing.B) {
+	m := New[string, int]()
+	m.items = make(map[string]item[int], 1000)
+	for i := 0; i < 1000; i++ {
+		m.Set(getKey(i), i)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m.Range(func(key string, value int) bool {
+			return true
+		})
+	}
+}
+
+func BenchmarkSafeMap_Flush(b *testing.B) {
+	m := New[string, int]()
+	m.items = make(map[string]item[int], 100)
+	// Pre-fill the map
+	for i := 0; i < 100; i++ {
+		m.Set(fmt.Sprintf("key%d", i), i)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m.Flush()
+	}
+}
+
+func BenchmarkSafeMap_Keys(b *testing.B) {
+	m := New[string, int]()
+	m.items = make(map[string]item[int], 1000)
+	for i := 0; i < 1000; i++ {
+		m.Set(getKey(i), i)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = m.Keys()
+	}
+}
+
+func BenchmarkSafeMap_Values(b *testing.B) {
+	m := New[string, int]()
+	m.items = make(map[string]item[int], 1000)
+	for i := 0; i < 1000; i++ {
+		m.Set(getKey(i), i)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = m.Values()
+	}
+}
+
+func BenchmarkSafeMap_KeysEmpty(b *testing.B) {
+	m := New[string, int]()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = m.Keys()
+	}
+}
+
+func BenchmarkSafeMap_ValuesEmpty(b *testing.B) {
+	m := New[string, int]()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = m.Values()
+	}
+}
+
+type stdSafeMap struct {
+	sync.RWMutex
+	items map[string]any
+}
+
+func newStdMap() *stdSafeMap {
+	return &stdSafeMap{
+		items: make(map[string]any),
+	}
+}
+
+func (m *stdSafeMap) Get(key string) (any, bool) {
+	m.RLock()
+	v, ok := m.items[key]
+	m.RUnlock()
+	return v, ok
+}
+
+func (m *stdSafeMap) Set(key string, value any) {
+	m.Lock()
+	m.items[key] = value
+	m.Unlock()
+}
+
+func BenchmarkStdMap_Get(b *testing.B) {
+	m := newStdMap()
+	m.Set("test", "value")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m.Get("test")
+	}
+}
+
+func BenchmarkStdMap_GetNonExistent(b *testing.B) {
+	m := newStdMap()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m.Get("non-existent")
+	}
+}
+
+func BenchmarkStdMap_Set(b *testing.B) {
+	m := newStdMap()
+	m.items = make(map[string]any, b.N)
+	key := "test"
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m.Set(key, "small value")
+	}
+}
+
+func BenchmarkStdMap_SetLarge(b *testing.B) {
+	m := newStdMap()
+	m.items = make(map[string]any, b.N)
+	largeValue := strings.Repeat("x", 1024*1024) // 1MB string
+	key := "test"
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m.Set(key, largeValue)
+	}
+}
+
+func BenchmarkStdMap_ConcurrentSetAndGet(b *testing.B) {
+	m := newStdMap()
+	m.items = make(map[string]any, b.N)
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			if i%2 == 0 {
+				m.Set(fmt.Sprint(i), i)
+			} else {
+				m.Get(fmt.Sprint(i - 1))
+			}
+			i++
+		}
+	})
+}
+
+func TestSafeMap_Sugar(t *testing.T) {
+	t.Run("GetOrSet", func(t *testing.T) {
+		m := New[string, int]()
+
+		// Test getting non-existent value
+		val, loaded := m.GetOrSet("key", 42)
+		if loaded || val != 42 {
+			t.Errorf("GetOrSet should set new value, got loaded=%v, val=%v", loaded, val)
+		}
+
+		// Test getting existing value
+		val, loaded = m.GetOrSet("key", 100)
+		if !loaded || val != 42 {
+			t.Errorf("GetOrSet should return existing value, got loaded=%v, val=%v", loaded, val)
+		}
+	})
+
+	t.Run("GetOrCompute", func(t *testing.T) {
+		m := New[string, int]()
+		computed := false
+
+		fn := func() int {
+			computed = true
+			return 42
+		}
+
+		// Test computing non-existent value
+		val := m.GetOrCompute("key", fn)
+		if !computed || val != 42 {
+			t.Errorf("GetOrCompute should compute new value, got computed=%v, val=%v", computed, val)
+		}
+
+		// Test getting existing value
+		computed = false
+		val = m.GetOrCompute("key", fn)
+		if computed || val != 42 {
+			t.Errorf("GetOrCompute should return existing value, got computed=%v, val=%v", computed, val)
+		}
+	})
+
+	t.Run("SetIfNotExists", func(t *testing.T) {
+		m := New[string, int]()
+
+		// Test setting non-existent value
+		if !m.SetIfNotExists("key", 42) {
+			t.Error("SetIfNotExists should return true for new key")
+		}
+
+		// Test setting existing value
+		if m.SetIfNotExists("key", 100) {
+			t.Error("SetIfNotExists should return false for existing key")
+		}
+
+		// Verify value wasn't changed
+		if val, _ := m.Get("key"); val != 42 {
+			t.Errorf("SetIfNotExists should not change existing value, got %v", val)
+		}
+	})
+
+	t.Run("DeleteAll", func(t *testing.T) {
+		m := New[string, int]()
+		m.Set("one", 1)
+		m.Set("two", 2)
+		m.Set("three", 3)
+
+		count := m.DeleteAll("one", "two", "missing")
+		if count != 2 {
+			t.Errorf("DeleteAll should return number of deleted keys, got %d", count)
+		}
+
+		if m.Len() != 1 {
+			t.Errorf("DeleteAll should remove specified keys, got len=%d", m.Len())
+		}
+	})
+
+	t.Run("GetAll", func(t *testing.T) {
+		m := New[string, int]()
+		m.Set("one", 1)
+		m.Set("two", 2)
+
+		result := m.GetAll("one", "two", "missing")
+		if len(result) != 2 {
+			t.Errorf("GetAll should return only existing keys, got %d keys", len(result))
+		}
+		if result["one"] != 1 || result["two"] != 2 {
+			t.Error("GetAll returned incorrect values")
+		}
+	})
+
+	t.Run("SetAll", func(t *testing.T) {
+		m := New[string, string](1) // 1MB limit
+		pairs := map[string]string{
+			"small1": "value1",
+			"small2": "value2",
+			"large":  strings.Repeat("x", 2*1024*1024), // 2MB
+		}
+
+		count := m.SetAll(pairs)
+		if count != 2 {
+			t.Errorf("SetAll should return number of pairs set, got %d", count)
+		}
+
+		if m.Len() != 2 {
+			t.Errorf("SetAll should respect size limits, got len=%d", m.Len())
+		}
+	})
+}
+
+func TestOrderedMap_Sugar(t *testing.T) {
+	t.Run("GetOrSet", func(t *testing.T) {
+		m := NewOrdered[string, int]()
+
+		// Test getting non-existent value
+		val, loaded := m.GetOrSet("key", 42)
+		if loaded || val != 42 {
+			t.Errorf("GetOrSet should set new value, got loaded=%v, val=%v", loaded, val)
+		}
+
+		// Test getting existing value
+		val, loaded = m.GetOrSet("key", 100)
+		if !loaded || val != 42 {
+			t.Errorf("GetOrSet should return existing value, got loaded=%v, val=%v", loaded, val)
+		}
+	})
+
+	t.Run("GetOrCompute", func(t *testing.T) {
+		m := NewOrdered[string, int]()
+		computed := false
+
+		fn := func() int {
+			computed = true
+			return 42
+		}
+
+		// Test computing non-existent value
+		val := m.GetOrCompute("key", fn)
+		if !computed || val != 42 {
+			t.Errorf("GetOrCompute should compute new value, got computed=%v, val=%v", computed, val)
+		}
+
+		// Test getting existing value
+		computed = false
+		val = m.GetOrCompute("key", fn)
+		if computed || val != 42 {
+			t.Errorf("GetOrCompute should return existing value, got computed=%v, val=%v", computed, val)
+		}
+	})
+
+	t.Run("SetIfNotExists", func(t *testing.T) {
+		m := NewOrdered[string, int]()
+
+		// Test setting non-existent value
+		if !m.SetIfNotExists("key", 42) {
+			t.Error("SetIfNotExists should return true for new key")
+		}
+
+		// Test setting existing value
+		if m.SetIfNotExists("key", 100) {
+			t.Error("SetIfNotExists should return false for existing key")
+		}
+
+		// Verify value wasn't changed
+		if val, _ := m.Get("key"); val != 42 {
+			t.Errorf("SetIfNotExists should not change existing value, got %v", val)
+		}
+	})
+
+	t.Run("DeleteAll", func(t *testing.T) {
+		m := NewOrdered[string, int]()
+		m.Set("one", 1)
+		m.Set("two", 2)
+		m.Set("three", 3)
+
+		count := m.DeleteAll("one", "two", "missing")
+		if count != 2 {
+			t.Errorf("DeleteAll should return number of deleted keys, got %d", count)
+		}
+
+		if m.Len() != 1 {
+			t.Errorf("DeleteAll should remove specified keys, got len=%d", m.Len())
+		}
+	})
+
+	t.Run("GetAll", func(t *testing.T) {
+		m := NewOrdered[string, int]()
+		m.Set("one", 1)
+		m.Set("two", 2)
+
+		result := m.GetAll("one", "two", "missing")
+		if len(result) != 2 {
+			t.Errorf("GetAll should return only existing keys, got %d keys", len(result))
+		}
+		if result["one"] != 1 || result["two"] != 2 {
+			t.Error("GetAll returned incorrect values")
+		}
+	})
+
+	t.Run("SetAll", func(t *testing.T) {
+		m := NewOrdered[string, int]()
+		pairs := map[string]int{
+			"one": 1,
+			"two": 2,
+		}
+
+		count := m.SetAll(pairs)
+		if count != 2 {
+			t.Errorf("SetAll should return number of pairs set, got %d", count)
+		}
+
+		if m.Len() != 2 {
+			t.Errorf("SetAll should set all pairs, got len=%d", m.Len())
+		}
+
+		// Verify order is maintained
+		keys := m.Keys()
+		if len(keys) != 2 {
+			t.Errorf("Expected 2 keys, got %d", len(keys))
+		}
+	})
 }
