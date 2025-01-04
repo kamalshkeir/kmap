@@ -10,8 +10,8 @@ var (
 )
 
 type item[V any] struct {
-	value V
-	size  int
+	Value V
+	Size  int
 }
 
 type SafeMap[K comparable, V any] struct {
@@ -37,7 +37,7 @@ func (c *SafeMap[K, V]) Get(key K) (v V, ok bool) {
 	c.RLock()
 	if i, exists := c.items[key]; exists {
 		c.RUnlock()
-		return i.value, true
+		return i.Value, true
 	}
 	c.RUnlock()
 	return
@@ -48,7 +48,7 @@ func (c *SafeMap[K, V]) GetAny(keys ...K) (v V, ok bool) {
 	for _, key := range keys {
 		if i, exists := c.items[key]; exists {
 			c.RUnlock()
-			return i.value, true
+			return i.Value, true
 		}
 	}
 	c.RUnlock()
@@ -82,11 +82,11 @@ func (c *SafeMap[K, V]) Set(key K, value V) error {
 
 	// Update size tracking
 	if i, exists := c.items[key]; exists {
-		c.size -= i.size
+		c.size -= i.Size
 	}
 
 	// Store item in map
-	c.items[key] = item[V]{value: value, size: size}
+	c.items[key] = item[V]{Value: value, Size: size}
 	c.size += size
 
 	return nil
@@ -95,7 +95,7 @@ func (c *SafeMap[K, V]) Set(key K, value V) error {
 func (c *SafeMap[K, V]) Delete(key K) {
 	c.Lock()
 	if i, ok := c.items[key]; ok {
-		c.size -= i.size
+		c.size -= i.Size
 		delete(c.items, key)
 	}
 	c.Unlock()
@@ -143,7 +143,7 @@ func (c *SafeMap[K, V]) Values() []V {
 	values := make([]V, n)
 	i := 0
 	for _, item := range c.items {
-		values[i] = item.value
+		values[i] = item.Value
 		i++
 	}
 	c.RUnlock()
@@ -167,7 +167,7 @@ func (c *SafeMap[K, V]) Range(f func(key K, value V) bool) {
 		pairs = append(pairs, struct {
 			k K
 			v V
-		}{k, item.value})
+		}{k, item.Value})
 	}
 	c.RUnlock()
 
@@ -209,7 +209,7 @@ func (c *SafeMap[K, V]) SetIfNotExists(key K, value V) bool {
 	if _, exists := c.items[key]; exists {
 		return false
 	}
-	c.items[key] = item[V]{value: value, size: 64}
+	c.items[key] = item[V]{Value: value, Size: 64}
 	c.size += 64
 	return true
 }
@@ -224,7 +224,7 @@ func (c *SafeMap[K, V]) DeleteAll(keys ...K) int {
 	count := 0
 	for _, key := range keys {
 		if i, ok := c.items[key]; ok {
-			c.size -= i.size
+			c.size -= i.Size
 			delete(c.items, key)
 			count++
 		}
@@ -241,7 +241,7 @@ func (c *SafeMap[K, V]) GetAll(keys ...K) map[K]V {
 	result := make(map[K]V, len(keys))
 	for _, key := range keys {
 		if i, ok := c.items[key]; ok {
-			result[key] = i.value
+			result[key] = i.Value
 		}
 	}
 	c.RUnlock()
@@ -271,9 +271,9 @@ func (c *SafeMap[K, V]) SetAll(pairs map[K]V) int {
 			}
 		}
 		if i, exists := c.items[k]; exists {
-			c.size -= i.size
+			c.size -= i.Size
 		}
-		c.items[k] = item[V]{value: v, size: size}
+		c.items[k] = item[V]{Value: v, Size: size}
 		c.size += size
 		count++
 	}
