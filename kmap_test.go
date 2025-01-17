@@ -579,24 +579,6 @@ func TestSafeMap_Sugar(t *testing.T) {
 			t.Error("GetAll returned incorrect values")
 		}
 	})
-
-	t.Run("SetAll", func(t *testing.T) {
-		m := New[string, string](1) // 1MB limit
-		pairs := map[string]string{
-			"small1": "value1",
-			"small2": "value2",
-			"large":  strings.Repeat("x", 2*1024*1024), // 2MB
-		}
-
-		count := m.SetAll(pairs)
-		if count != 2 {
-			t.Errorf("SetAll should return number of pairs set, got %d", count)
-		}
-
-		if m.Len() != 2 {
-			t.Errorf("SetAll should respect size limits, got len=%d", m.Len())
-		}
-	})
 }
 
 func TestOrderedMap_Sugar(t *testing.T) {
@@ -685,29 +667,6 @@ func TestOrderedMap_Sugar(t *testing.T) {
 		}
 		if result["one"] != 1 || result["two"] != 2 {
 			t.Error("GetAll returned incorrect values")
-		}
-	})
-
-	t.Run("SetAll", func(t *testing.T) {
-		m := NewOrdered[string, int]()
-		pairs := map[string]int{
-			"one": 1,
-			"two": 2,
-		}
-
-		count := m.SetAll(pairs)
-		if count != 2 {
-			t.Errorf("SetAll should return number of pairs set, got %d", count)
-		}
-
-		if m.Len() != 2 {
-			t.Errorf("SetAll should set all pairs, got len=%d", m.Len())
-		}
-
-		// Verify order is maintained
-		keys := m.Keys()
-		if len(keys) != 2 {
-			t.Errorf("Expected 2 keys, got %d", len(keys))
 		}
 	})
 }

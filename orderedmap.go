@@ -1,7 +1,6 @@
 package kmap
 
 import (
-	"fmt"
 	"sync"
 )
 
@@ -53,41 +52,39 @@ func (m *OrderedMap[K, V]) Set(key K, value V) error {
 	m.Lock()
 	defer m.Unlock()
 
-	// Use a fixed size for all values to avoid allocations
-	size := 64
-
 	if m.limit > 0 {
 		// Only check string size if we have a size limit
-		switch v := any(value).(type) {
-		case string:
-			if len(v) > m.limit {
-				return fmt.Errorf("exceeded size limit")
-			}
-			size = len(v)
+		size := getValueSize(value)
+		if size > m.limit {
+			return ErrLargeData
 		}
 
 		if size+m.size > m.limit {
-			for k := range m.kv {
-				delete(m.kv, k)
-			}
-			m.ll = list[K, V]{}
-			m.size = 0
+			return ErrLimitExceeded
 		}
+		_, alreadyExist := m.kv[key]
+		if alreadyExist {
+			oldSize := m.kv[key].size
+			m.kv[key].Value = value
+			m.kv[key].size = size
+			m.size = m.size - oldSize + size
+			return nil
+		}
+		element := m.ll.PushBack(key, value)
+		element.size = size
+		m.kv[key] = element
+		m.size += size
+		return nil
 	}
 
 	_, alreadyExist := m.kv[key]
 	if alreadyExist {
-		oldSize := m.kv[key].size
 		m.kv[key].Value = value
-		m.kv[key].size = size
-		m.size = m.size - oldSize + size
 		return nil
 	}
 
 	element := m.ll.PushBack(key, value)
-	element.size = size
 	m.kv[key] = element
-	m.size += size
 	return nil
 }
 
@@ -151,6 +148,15 @@ func (m *OrderedMap[K, V]) Delete(key K) (didDelete bool) {
 	return ok
 }
 
+func (m *OrderedMap[K, V]) Clear() {
+	m.Lock()
+	defer m.Unlock()
+	for k := range m.kv {
+		delete(m.kv, k)
+	}
+	m.ll = list[K, V]{}
+	m.size = 0
+}
 func (m *OrderedMap[K, V]) Flush() {
 	m.Lock()
 	defer m.Unlock()
@@ -219,12 +225,12 @@ func (m *OrderedMap[K, V]) GetOrCompute(key K, fn func() V) V {
 // If the key exists, it returns false and makes no changes.
 func (m *OrderedMap[K, V]) SetIfNotExists(key K, value V) bool {
 	m.Lock()
-	defer m.Unlock()
 	if _, exists := m.kv[key]; exists {
+		m.Unlock()
 		return false
 	}
-	m.ll.PushBack(key, value)
-	m.kv[key] = m.ll.Back()
+	m.Unlock()
+	m.Set(key, value)
 	return true
 }
 
@@ -260,24 +266,4 @@ func (m *OrderedMap[K, V]) GetAll(keys ...K) map[K]V {
 	}
 	m.RUnlock()
 	return result
-}
-
-// SetAll sets all the key-value pairs in order and returns number of pairs set
-func (m *OrderedMap[K, V]) SetAll(pairs map[K]V) int {
-	if len(pairs) == 0 {
-		return 0
-	}
-	m.Lock()
-	defer m.Unlock()
-	count := 0
-	for k, v := range pairs {
-		if e, exists := m.kv[k]; exists {
-			e.Value = v
-		} else {
-			m.ll.PushBack(k, v)
-			m.kv[k] = m.ll.Back()
-		}
-		count++
-	}
-	return count
 }

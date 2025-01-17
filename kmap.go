@@ -3,10 +3,12 @@ package kmap
 import (
 	"errors"
 	"sync"
+	"unsafe"
 )
 
 var (
-	ErrLargeData = errors.New("data exceeds the limit limit, will not be inserted")
+	ErrLimitExceeded = errors.New("map exceeds the limit, should be Flushed")
+	ErrLargeData     = errors.New("data exceeds the limit limit, will not be inserted")
 )
 
 type item[V any] struct {
@@ -55,40 +57,76 @@ func (c *SafeMap[K, V]) GetAny(keys ...K) (v V, ok bool) {
 	return
 }
 
+func getValueSize(value any) int {
+	var size int
+	switch v := value.(type) {
+	case string:
+		size = len(v)
+	case []byte:
+		size = len(v)
+	case []int:
+		size = len(v) * 8
+	case []uint:
+		size = len(v) * 8
+	case []int64:
+		size = len(v) * 8
+	case []uint64:
+		size = len(v) * 8
+	case []float64:
+		size = len(v) * 8
+	case []float32:
+		size = len(v) * 8
+	case map[string]string:
+		size = 0
+		for k, val := range v {
+			size += len(k) + len(val)
+		}
+	case map[string]any:
+		size = 0
+		for k, val := range v {
+			size += len(k)
+			if str, ok := val.(string); ok {
+				size += len(str)
+			} else {
+				size += int(unsafe.Sizeof(val))
+			}
+		}
+	case int, uint, int64, uint64, int8, uint8, int16, uint16, int32, uint32:
+		size = 8
+	default:
+		// For basic types and structs, use unsafe.Sizeof
+		size = int(unsafe.Sizeof(value))
+	}
+	return size
+}
+
 func (c *SafeMap[K, V]) Set(key K, value V) error {
 	c.Lock()
 	defer c.Unlock()
 
-	// Use a fixed size for all values to avoid allocations
-	size := 64
-
 	// Check size limits if enabled
 	if c.limit > 0 {
-		// Only check string size if we have a size limit
-		switch v := any(value).(type) {
-		case string:
-			if len(v) > c.limit {
-				return ErrLargeData
-			}
-			size = len(v)
+		size := getValueSize(value)
+		if size > c.limit {
+			return ErrLargeData
 		}
 
 		if size+c.size > c.limit {
-			// Clear map
-			c.items = make(map[K]item[V])
-			c.size = 0
+			return ErrLimitExceeded
 		}
-	}
+		// Update size tracking
+		if i, exists := c.items[key]; exists {
+			c.size -= i.Size
+		}
 
-	// Update size tracking
-	if i, exists := c.items[key]; exists {
-		c.size -= i.Size
-	}
+		// Store item in map
+		c.items[key] = item[V]{Value: value, Size: size}
+		c.size += size
 
+		return nil
+	}
 	// Store item in map
-	c.items[key] = item[V]{Value: value, Size: size}
-	c.size += size
-
+	c.items[key] = item[V]{Value: value}
 	return nil
 }
 
@@ -102,6 +140,14 @@ func (c *SafeMap[K, V]) Delete(key K) {
 }
 
 func (c *SafeMap[K, V]) Flush() {
+	c.Lock()
+	if len(c.items) > 0 {
+		c.items = make(map[K]item[V])
+		c.size = 0
+	}
+	c.Unlock()
+}
+func (c *SafeMap[K, V]) Clear() {
 	c.Lock()
 	if len(c.items) > 0 {
 		c.items = make(map[K]item[V])
@@ -205,12 +251,13 @@ func (c *SafeMap[K, V]) GetOrCompute(key K, fn func() V) V {
 // If the key exists, it returns false and makes no changes.
 func (c *SafeMap[K, V]) SetIfNotExists(key K, value V) bool {
 	c.Lock()
-	defer c.Unlock()
 	if _, exists := c.items[key]; exists {
+		c.Unlock()
 		return false
 	}
-	c.items[key] = item[V]{Value: value, Size: 64}
-	c.size += 64
+	c.Unlock()
+
+	c.Set(key, value)
 	return true
 }
 
@@ -246,36 +293,4 @@ func (c *SafeMap[K, V]) GetAll(keys ...K) map[K]V {
 	}
 	c.RUnlock()
 	return result
-}
-
-// SetAll sets all the key-value pairs and returns number of pairs set
-func (c *SafeMap[K, V]) SetAll(pairs map[K]V) int {
-	if len(pairs) == 0 {
-		return 0
-	}
-	c.Lock()
-	defer c.Unlock()
-	count := 0
-	for k, v := range pairs {
-		size := 64
-		if c.limit > 0 {
-			switch val := any(v).(type) {
-			case string:
-				if len(val) > c.limit {
-					continue
-				}
-				size = len(val)
-			}
-			if size+c.size > c.limit {
-				break
-			}
-		}
-		if i, exists := c.items[k]; exists {
-			c.size -= i.Size
-		}
-		c.items[k] = item[V]{Value: v, Size: size}
-		c.size += size
-		count++
-	}
-	return count
 }
